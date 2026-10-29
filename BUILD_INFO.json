@@ -1,0 +1,31 @@
+{
+  "version": "0.5.1",
+  "architecture": "Windows x64",
+  "animationCount": 35,
+  "sourceSHA256": {
+    "platform_support.py": "12cb9f6eb78574084c91787b2ade82453d23e46a2ae05e973b86d06e235df8da",
+    "mac_autostart.py": "2d3c19ed727b5ff3c9444eccc4ee3cff655630b3ca6f97d1357b3a977592c59a",
+    "test_platform_support.py": "0d2ef41597c0786daf0951d6b53dae7e4aea414c6bdd58dc06ddd3c8ad1655d1",
+    "test_preferences.py": "51c2c0501d4b823e8a14f61ca9ccdaf9c41126fa2469d343eb088afb8c63ddf5",
+    "desktop_task_sync.py": "5ba58271acf3db17dc9d1126a5f7b0067699c8ad072dd8aefd08b7bd765c7960",
+    "test_desktop_task_sync.py": "4484e2559d9e7041b83058f11f129864d3cb316934b141f946beda6d9e19e377",
+    "pet.py": "8fad7bd14f8ec4e45cf7cbbdf8741919d97d1836ddd77e705873cf23be354586",
+    "movement.py": "711bb63aeb4df2653aa0a88968269c52526c85c43a2937b034ffc40d2ff21bf4",
+    "test_movement.py": "61a45b562d884f0244cf85097bb000f003b89b2942a6e0af789f8d31a20a9304",
+    "quota.py": "68bb7af7b94ee79d0130590c947f0da17e5eefeefed0bbbc8b963957c145f8b7",
+    "autostart.py": "b003133cd133c9b4e334219f7914f95911458477f43284bf74895bab1f644ba2",
+    "prepare_assets.py": "db4dd6e07b2b3b331f76016ccbc0b3954c1f8d07e9c08610804fe94c2e8c1cba",
+    "test_pet.py": "fd3a87615aacf19da842f91bf967a82be585fc2bcbf8dc7417ef1abe72dc9cbf",
+    "selftest.py": "45b996df6d1ec29c7bff868425ac01bdb481d8019a4838da37218d3ae5bc507c",
+    "version.py": "b0804ca353e883bd57502d21438a771e7cb9ad3f2ecdb60a15beb4df302db762",
+    "test_quota.py": "d22edcc2bcdd8759818e12fa6014b9300860e5d2d4cd89a3b4fc805a0bf44208",
+    "chat_backend.py": "04cbab67bd909f4416c004f0380f3dad5e671fd6e69b9bdfe850fa8ddf28f25e",
+    "chat_ui.py": "3409a3798b5e5b42493777b12ecdceb23acfcb8bb6f09ac5d678ae60d9df2422",
+    "test_chat.py": "0a3181efaa4abc64810df5ebfdb8c09dd3728c3207dad1be8b23e54e861ab699",
+    "desktop_visibility.py": "b3e4f6acf9532aa5018d45a8e4e07721f19526b379a98204980087011ae1072e",
+    "test_visibility.py": "1bc7e1375a4e0463f345f4675914f5dc300af7309b998c7618d6cddad3d323d0",
+    "test_session_reuse.py": "9c2b7e8a3f99cad14efc3748a0e97a5fda263d90c260e57a1cc181b6cab6c91e",
+    "test_task_notifications.py": "b7af72f0f7050b34881f79225610a0481d581c4e8919e0b263b0e82836185f10",
+    "video_frames.py": "a8926c64aa2588c95d9c5ee1bbc17ecc3bbde16fafab6d0000ee3e140cbae73f"
+  }
+}

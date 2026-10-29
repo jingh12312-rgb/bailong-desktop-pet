@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+app/cache/
+app/*状态.json
+app/*.jsonl
+outputs/
+发布包/
+.build*/
+*.zip
+检查报告.json
+检查预览.png
