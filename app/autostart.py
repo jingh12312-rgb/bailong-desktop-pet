@@ -7,6 +7,9 @@ import psutil
 ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]
 
 def gpt_is_open():
+    if sys.platform.startswith('linux'):
+        from linux_autostart import gpt_is_open as detect
+        return detect()
     for process in psutil.process_iter(['name','exe']):
         try:
             name=(process.info['name'] or '').lower()
@@ -18,6 +21,15 @@ def gpt_is_open():
     return False
 
 def launch_pet():
+    if sys.platform.startswith('linux'):
+        args=[sys.executable] if getattr(sys,'frozen',False) else [sys.executable,str(ROOT/'app/pet.py')]
+        from platform_support import state_root
+        log_file=state_root()/'app/桌宠启动日志.txt'
+        log_file.parent.mkdir(parents=True,exist_ok=True)
+        descriptor=os.open(log_file,os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600)
+        with os.fdopen(descriptor,'ab') as log:
+            return subprocess.Popen(args,cwd=ROOT,start_new_session=True,stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL,stderr=log).pid
     if sys.platform=='darwin':
         args=[sys.executable] if getattr(sys,'frozen',False) else [sys.executable,str(ROOT/'app/pet.py')]
         return subprocess.Popen(args,start_new_session=True).pid
@@ -34,6 +46,9 @@ def startup_entry():
     return Path(buffer.value)/'BailongPetAutostart.vbs'
 
 def enable_autostart():
+    if sys.platform.startswith('linux'):
+        from linux_autostart import enable
+        return enable()
     if sys.platform=='darwin':
         from mac_autostart import enable
         return enable()
@@ -47,6 +62,9 @@ def enable_autostart():
     subprocess.Popen(args,cwd=ROOT,creationflags=subprocess.CREATE_NO_WINDOW)
 
 def disable_autostart():
+    if sys.platform.startswith('linux'):
+        from linux_autostart import disable
+        return disable()
     if sys.platform=='darwin':
         from mac_autostart import disable
         return disable()
@@ -63,6 +81,9 @@ def disable_autostart():
         except (psutil.NoSuchProcess,psutil.AccessDenied):pass
 
 def main():
+    if sys.platform.startswith('linux'):
+        from linux_autostart import monitor
+        return monitor()
     if sys.platform=='darwin':
         from mac_autostart import monitor
         return monitor()

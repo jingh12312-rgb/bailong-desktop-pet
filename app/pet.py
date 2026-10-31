@@ -2,6 +2,8 @@ import json, random, sys, time, threading, gzip, os
 from pathlib import Path
 from collections import OrderedDict
 from datetime import datetime
+from linux_support import configure_qpa
+configure_qpa()  # Must precede Qt initialization on Linux.
 from PIL import Image
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QPointF, QRect, QRectF, QSize, QSettings, QEvent
 from PySide6.QtGui import QImage, QPixmap, QPainter, QRegion, QCursor, QIcon, QTransform
@@ -11,7 +13,7 @@ from quota import read_quota, quota_windows
 from version import VERSION
 from movement import plan_movement, movement_fraction
 
-from platform_support import resource_root,state_root,configure_mac_window
+from platform_support import resource_root,state_root,configure_mac_window,cache_root
 ROOT=resource_root()
 STATE_ROOT=state_root()
 ASSETS=ROOT/'outputs/白龙桌宠素材'
@@ -67,7 +69,35 @@ class Bubble(QWidget):
             if button is not self.close_button:
                 button.setStyleSheet(f'color:#60358c;background:#eee5f7;border:0;border-radius:7px;padding:{max(3,round(7*s))}px;')
         self.close_button.setStyleSheet(f'QPushButton {{color:#776783;background:transparent;border:0;border-radius:8px;font-size:{max(12,round(19*s))}px;}} QPushButton:hover {{background:#eee5f7;color:#503768;}}')
-        self.adjustSize();self.close_button.move(self.width()-self.close_button.width()-5,5);self.close_button.raise_()
+        self.fit_contents()
+    def fit_contents(self):
+        # A wrapped QLabel's unconstrained sizeHint can be only one line high.
+        # Resolve styling first, then measure the layout at the actual fixed width.
+        self.ensurePolished()
+        margins=self.layout.contentsMargins()
+        content_width=max(1,self.width()-margins.left()-margins.right())
+        heights=[]
+        for index in range(self.layout.count()):
+            widget=self.layout.itemAt(index).widget()
+            if widget:
+                # addWidget defers showing children of an already visible bubble;
+                # hidden items would otherwise be omitted from heightForWidth.
+                widget.ensurePolished();widget.show();widget.updateGeometry()
+                if isinstance(widget,QLabel):
+                    widget.setMinimumHeight(0)
+                    height=widget.heightForWidth(content_width)
+                    if height<0:height=widget.sizeHint().height()
+                    widget.setMinimumHeight(height)
+                else:
+                    height=max(widget.minimumHeight(),widget.sizeHint().height())
+                    height=min(widget.maximumHeight(),height)
+                heights.append(height)
+        self.layout.invalidate()
+        height=margins.top()+margins.bottom()+sum(heights)+max(0,len(heights)-1)*self.layout.spacing()
+        self.setFixedHeight(max(height,self.close_button.height()+10))
+        self.layout.activate()
+        self.layout.setGeometry(self.rect())
+        self.close_button.move(self.width()-self.close_button.width()-5,5);self.close_button.raise_()
     def paintEvent(self,event):
         painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(Qt.GlobalColor.white);painter.setPen(Qt.GlobalColor.transparent)
@@ -408,10 +438,11 @@ class Pet(QWidget):
         if key in self.pinned_frames:return self.pinned_frames[key]
         if key in self.cache: self.cache.move_to_end(key);return self.cache[key]
         frames=[]
-        packed=ROOT/'app/cache'/f'{item["id"]}-hq.rgba.gz';metadata=packed.with_suffix('.json')
+        packed=cache_root()/f'{item["id"]}-hq.rgba.gz';metadata=packed.with_suffix('.json')
         if packed.is_file() and metadata.is_file():
+            from video_frames import alpha_cleanup_tag
             meta=json.loads(metadata.read_text(encoding='utf-8'));stat=path.stat()
-            if meta['sourceSize']==stat.st_size and meta['sourceMtime']==stat.st_mtime_ns:
+            if meta['sourceSize']==stat.st_size and meta['sourceMtime']==stat.st_mtime_ns and meta.get('alphaCleanup')==alpha_cleanup_tag(path):
                 raw=gzip.decompress(packed.read_bytes());stride=512*512*4
                 if len(raw)==meta['frames']*stride:
                     for offset in range(0,len(raw),stride):
@@ -620,6 +651,7 @@ class Pet(QWidget):
             view=self.bubble.result_view;bar=view.verticalScrollBar()
             bottom=bar.value()>=bar.maximum()-8;old=bar.value()
             self.bubble.result_title.setText(title);view.setPlainText(text)
+            self.bubble.fit_contents()
             bar.setValue(bar.maximum() if bottom else min(old,bar.maximum()))
         else:
             self.bubble.task_result(title,text,details);self.bubble.is_task_progress=True
@@ -657,6 +689,13 @@ class Pet(QWidget):
         menu.addSeparator()
         automatic=menu.addAction('全屏时自动隐藏');automatic.setCheckable(True)
         automatic.setChecked(self.auto_hide_fullscreen);automatic.toggled.connect(self.set_auto_hide_fullscreen)
+        if sys.platform.startswith('linux') and QApplication.platformName()!='offscreen':
+            from linux_support import fullscreen_capability
+            supported,reason=fullscreen_capability()
+            if not supported:
+                automatic.blockSignals(True);automatic.setChecked(False);automatic.blockSignals(False)
+                automatic.setEnabled(False)
+                automatic.setText('全屏时自动隐藏（当前会话不支持）');automatic.setToolTip(reason)
         menu.addSeparator()
         menu.addAction('关闭对话模式' if self.chat and self.chat.enabled else '打开对话模式',self.toggle_chat)
         menu.addAction('查看历史对话',self.open_history)
@@ -806,7 +845,7 @@ class Pet(QWidget):
         self.click_timer.stop();self.last_click=None;self.generation+=1;self.play(item,'idle')
     def play_click_sound(self):
         if self.sound_disabled:return
-        if sys.platform=='darwin':
+        if sys.platform in ('darwin','linux'):
             from PySide6.QtMultimedia import QSoundEffect
             from PySide6.QtCore import QUrl
             if not hasattr(self,'click_sound'):
@@ -910,12 +949,24 @@ class Pet(QWidget):
         QApplication.quit();event.accept()
 
 def main():
+    def option(name):
+        if name not in sys.argv:return None
+        index=sys.argv.index(name)
+        if index+1>=len(sys.argv):raise ValueError(name+' 缺少参数')
+        return sys.argv[index+1]
     if '--autostart' in sys.argv:
         from autostart import main as monitor
         return monitor()
     if '--self-test' in sys.argv:
         from selftest import run
-        return run(ROOT)
+        return run(ROOT,output=option('--self-test-output'),model=option('--test-model'))
+    if '--gui-test' in sys.argv:
+        from linux_acceptance import run
+        return run(ROOT,option('--self-test-output'),live_model=option('--test-model'))
+    if '--check-linux' in sys.argv:
+        from linux_support import diagnostics
+        report=diagnostics(ROOT)
+        print(json.dumps(report,ensure_ascii=False,indent=2));return 0 if report['ready_for_gui_test'] else 2
     app=QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     if '--enable-autostart' in sys.argv or '--disable-autostart' in sys.argv:
@@ -926,9 +977,19 @@ def main():
             else:disable_autostart();message='已关闭桌宠自动启动。'
             QMessageBox.information(None,'白龙桌宠',message);return 0
         except Exception as error:QMessageBox.critical(None,'设置失败',str(error));return 1
-    socket=QLocalSocket();socket.connectToServer('bailong-desktop-pet-v1')
-    if socket.waitForConnected(150):return 0
-    QLocalServer.removeServer('bailong-desktop-pet-v1');server=QLocalServer();server.listen('bailong-desktop-pet-v1')
+    instance_lock=None
+    server_name='bailong-desktop-pet-v1'
+    if sys.platform.startswith('linux'):
+        from linux_runtime import acquire_instance,instance_name
+        instance_lock=acquire_instance();server_name=instance_name()
+        if instance_lock is None:
+            socket=QLocalSocket();socket.connectToServer(server_name);socket.waitForConnected(500)
+            return 0
+    else:
+        socket=QLocalSocket();socket.connectToServer(server_name)
+        if socket.waitForConnected(150):return 0
+    QLocalServer.removeServer(server_name);server=QLocalServer()
+    if not server.listen(server_name):raise RuntimeError('无法创建桌宠单实例通信端点：'+server.errorString())
     try:
         pet=Pet();pet.show();configure_mac_window(pet);configure_mac_window(pet.bubble)
         def reveal_existing_pet():

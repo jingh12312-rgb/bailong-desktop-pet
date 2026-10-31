@@ -1,4 +1,4 @@
-import os
+import os,sys
 os.environ['QT_QPA_PLATFORM']='offscreen'
 import unittest
 from unittest.mock import patch
@@ -46,11 +46,19 @@ class PreferencesTests(unittest.TestCase):
   p.set_task_bubbles_disabled(True);self.assertTrue(p.bubble.isVisible())
  def test_sound_mute_and_menu_options(self):
   p=self.pet;p.set_sound_disabled(True)
-  with patch('winsound.PlaySound') as sound:p.play_click_sound();sound.assert_not_called()
+  if sys.platform=='win32':
+   with patch('winsound.PlaySound') as sound:p.play_click_sound();sound.assert_not_called()
+  else:p.play_click_sound()
   menu=p.context_menu();names=[a.text() for a in menu.actions() if not a.isSeparator()]
   self.assertIn('对话框大小…',names);self.assertIn('桌宠大小…',names)
   toggle=next(a for a in menu.actions() if a.text()=='禁用音效');self.assertTrue(toggle.isChecked())
   self.assertEqual(names[-1],'退出桌宠');menu.deleteLater()
+ def test_progress_title_reflows_when_updated(self):
+  p=self.pet;p.set_bubble_percent(150)
+  p.task_progress('短标题','进度内容',lambda:None)
+  p.task_progress('主人，这一步需要的文件和资料已经准备好，接下来继续认真处理。','新进度',lambda:None)
+  app.processEvents();title=p.bubble.result_title
+  self.assertGreaterEqual(title.height(),title.heightForWidth(title.width()))
  def test_exception_summary_is_specific_and_redacts_secrets(self):
   text=problem_summary("Traceback:\nFileNotFoundError: [Errno 2] No such file: test.png\nAuthorization: Bearer SECRET",1)
   self.assertIn('文件或路径不存在',text);self.assertIn('test.png',text);self.assertNotIn('SECRET',text)
