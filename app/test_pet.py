@@ -29,7 +29,8 @@ class Tests(unittest.TestCase):
         self.pet.last_click=None
         QTest.mouseClick(self.pet,Qt.MouseButton.LeftButton,pos=QPoint(160,160));QTest.qWait(300)
         self.assertEqual(self.pet.mode,'variant');self.assertTrue(self.pet.bubble.isVisible())
-        self.assertLessEqual(self.pet.bubble_timer.remainingTime(),4000)
+        self.assertEqual(self.pet.bubble_timer.interval(),4000)
+        self.assertTrue(self.pet.bubble_timer.isActive())
     def test_variant_return_and_quota_stale(self):
         self.pet.choose(self.pet.variants[0]);self.pet.started=time.monotonic()-4.01;self.pet.animate()
         self.assertEqual(self.pet.mode,'idle')

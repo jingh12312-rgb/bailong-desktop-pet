@@ -2,8 +2,11 @@
 import os,json,time,traceback
 from pathlib import Path
 
-def run(root):
+def run(root, output=None, model=None):
     os.environ['QT_QPA_PLATFORM']='offscreen'
+    from platform_support import state_root
+    output=Path(output) if output else state_root()/'selftest'
+    output.mkdir(parents=True,exist_ok=True)
     report={'passed':False,'checks':[],'frozen':False}
     try:
         import sys
@@ -11,21 +14,23 @@ def run(root):
         report.update(version=VERSION,frozen=bool(getattr(sys,'frozen',False)))
         if '--chat-only' in sys.argv:
             from chat_backend import CodexSession
-            folder=root/'对话自检任务';folder.mkdir(exist_ok=True)
-            session=CodexSession(folder)
+            if not model:raise RuntimeError('真实对话自检必须通过 --test-model 显式指定模型。')
+            folder=output/'对话自检任务';folder.mkdir(exist_ok=True)
+            session=CodexSession(folder,mode='chat',model=model,effort='lowest')
             try:result=session.run('这是桌宠对话连接验收。不要使用工具，不要读写文件，只回复：白龙娘对话连接成功。')
             finally:session.close()
             assert '连接成功' in result['text'],result['text']
             report['checks'].append('EXE通过Codex后台任务收到真实回复；不记录账号、任务ID或额度数值')
             report['passed']=True
-            (root/'对话接口检查报告.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            report.update(model=model,effort=session.effort)
+            (output/'对话接口检查报告.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
             return 0
         if '--quota-only' in sys.argv:
             from quota import read_quota,quota_windows
-            windows=quota_windows(read_quota())
+            windows=quota_windows(read_quota(attempts=1,log_path=output/'quota-attempt.jsonl'))
             report['checks'].append(f'EXE只读额度接口成功，返回{len(windows)}个窗口；不记录账号或额度数值')
             report['passed']=True
-            (root/'额度接口检查报告.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            (output/'额度接口检查报告.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
             return 0
         from pet import Pet,clamp_position
         from quota import quota_windows
@@ -89,8 +94,9 @@ def run(root):
         assert not pet.tick.isActive() and not pet.isVisible()
         pet.fullscreen_hidden=False;pet.apply_visibility();assert pet.isVisible()
         report['checks'].append('托盘菜单、全屏隐藏暂停与恢复正常（离线状态模拟）')
-        pet.play(pet.idles[0],'idle');pet.grab().save(str(root/'检查预览.png'));pet.close()
+        pet.play(pet.idles[0],'idle');pet.grab().save(str(output/'检查预览.png'));pet.close()
         report['passed']=True
     except Exception:report['error']=traceback.format_exc()
-    (root/('额度接口检查报告.json' if '--quota-only' in __import__('sys').argv else '检查报告.json')).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+    name='对话接口检查报告.json' if '--chat-only' in __import__('sys').argv else ('额度接口检查报告.json' if '--quota-only' in __import__('sys').argv else '检查报告.json')
+    (output/name).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     return 0 if report['passed'] else 1

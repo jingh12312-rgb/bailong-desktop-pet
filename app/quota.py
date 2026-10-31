@@ -50,7 +50,7 @@ def find_codex():
         if not candidate:
             continue
         resolved = Path(candidate).expanduser()
-        if resolved.is_file():
+        if resolved.is_file() and (sys.platform=='win32' or os.access(resolved,os.X_OK)):
             return str(resolved)
         located = shutil.which(candidate)
         if located:
@@ -60,6 +60,21 @@ def find_codex():
         for path in (Path('/Applications/Codex.app/Contents/Resources/codex'),profile/'Applications/Codex.app/Contents/Resources/codex',Path('/opt/homebrew/bin/codex'),Path('/usr/local/bin/codex'),profile/'.local/bin/codex'):
             if path.is_file() and os.access(path,os.X_OK):return str(path)
         raise RuntimeError('没有找到 Codex。请安装 Codex，或设置 BAILONG_CODEX 指向 codex 可执行文件。')
+    if sys.platform.startswith('linux'):
+        paths=(profile/'.local/bin/codex',profile/'.npm-global/bin/codex',
+               profile/'.cargo/bin/codex',profile/'.bun/bin/codex',
+               Path('/usr/local/bin/codex'),Path('/usr/bin/codex'),Path('/snap/bin/codex'))
+        def version_key(path):
+            import re
+            match=re.search(r'/v?(\d+)\.(\d+)\.(\d+)/',str(path))
+            return tuple(map(int,match.groups())) if match else ()
+        versions=[*(profile/'.local/share/fnm/node-versions').glob('*/installation/bin/codex'),
+                  *(profile/'.fnm/node-versions').glob('*/installation/bin/codex'),
+                  *(profile/'.nvm/versions/node').glob('*/bin/codex')]
+        paths=(*paths,*sorted(versions,key=version_key,reverse=True))
+        for path in paths:
+            if path.is_file() and os.access(path,os.X_OK):return str(path)
+        raise RuntimeError('未找到 Codex CLI。请安装它或设置 BAILONG_CODEX 指向可执行文件。')
     local = Path(os.environ.get('LOCALAPPDATA') or profile / 'AppData' / 'Local')
     roots = [local / 'OpenAI' / 'Codex' / 'bin']
     candidates = []
@@ -76,12 +91,13 @@ def find_codex():
 
 def _read_quota_once(timeout=20, cancel=None):
     executable = find_codex()
+    from linux_runtime import child_options,stop_child
     frozen_windows=sys.platform=='win32' and getattr(sys,'frozen',False)
     if frozen_windows:ctypes.windll.kernel32.SetDllDirectoryW(None)
     try:
         process = subprocess.Popen([executable, 'app-server'], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8',
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),**child_options(executable))
     finally:
         if frozen_windows:ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)
     messages = queue.Queue()
@@ -111,9 +127,7 @@ def _read_quota_once(timeout=20, cancel=None):
         send({'id':2,'method':'account/rateLimits/read'})
         return result(2)
     finally:
-        if process.poll() is None: process.terminate()
-        try: process.wait(timeout=1)
-        except subprocess.TimeoutExpired: process.kill();process.wait()
+        stop_child(process)
         process.stdin.close();process.stdout.close()
 
 def quota_windows(data):

@@ -35,6 +35,9 @@ class FullscreenDetector:
         if sys.platform=='darwin':
             from platform_support import mac_fullscreen
             return mac_fullscreen()
+        if sys.platform.startswith('linux'):
+            from linux_support import linux_fullscreen
+            return linux_fullscreen()
         if self.user32 is None:
             return False
         c, w, u = self.ctypes, self.w, self.user32

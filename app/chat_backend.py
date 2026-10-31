@@ -72,7 +72,7 @@ class HistoryStore:
 
 class CodexSession:
     """One worker owns the process; callbacks deliver only public protocol events."""
-    def __init__(self, cwd, thread_id=None, cancel=None, emit=None, ask=None, mode='work'):
+    def __init__(self, cwd, thread_id=None, cancel=None, emit=None, ask=None, mode='work', model=None, effort=None):
         self.cwd = str(Path(cwd).resolve())
         self.thread_id = thread_id
         self.cancel = cancel or threading.Event()
@@ -88,19 +88,23 @@ class CodexSession:
         self.summary_parts={}
         self.mode=mode
         self.initialized=False
+        self.model=model
+        self.effort=effort
 
     def send(self, value):
         self.process.stdin.write(json.dumps(value, ensure_ascii=False) + '\n')
         self.process.stdin.flush()
 
     def start(self):
+        from linux_runtime import child_options
+        executable=find_codex()
         frozen_windows = sys.platform == 'win32' and getattr(sys, 'frozen', False)
         if frozen_windows:
             ctypes.windll.kernel32.SetDllDirectoryW(None)
         try:
-            self.process = subprocess.Popen([find_codex(), 'app-server'], cwd=self.cwd,
+            self.process = subprocess.Popen([executable, 'app-server'], cwd=self.cwd,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                text=True, encoding='utf-8', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                text=True, encoding='utf-8', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),**child_options(executable))
         finally:
             if frozen_windows:
                 ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)
@@ -227,25 +231,39 @@ class CodexSession:
             if not self.initialized:
                 self.rpc('initialize', {'clientInfo': {'name': 'bailong_pet', 'title': 'GPT白龙娘动态桌宠', 'version': VERSION}})
                 self.send({'method': 'initialized'})
+                if self.effort=='lowest':
+                    catalog=self.rpc('model/list',{'includeHidden':False})
+                    selected=next((m for m in catalog.get('data',[]) if m.get('model')==self.model or m.get('id')==self.model),None)
+                    if selected is None:raise RuntimeError('指定测试模型不在当前模型目录中：'+str(self.model))
+                    levels={v['reasoningEffort'] for v in selected.get('supportedReasoningEfforts',[])}
+                    self.effort=next((v for v in ('none','minimal','low','medium','high','xhigh') if v in levels),None)
+                    if self.effort is None:raise RuntimeError('指定测试模型没有可识别的推理档位。')
                 instruction=PERSONA+('当前为聊天模式：只根据对话直接交流，回答简短自然；不要查看或更改文件，不调用工具、不运行命令。如需实际操作，提醒主人切换工作模式。' if self.mode=='chat' else '')
                 params = {'cwd': self.cwd, 'sandbox': 'read-only' if self.mode=='chat' else 'workspace-write', 'approvalPolicy': 'on-request',
                           'approvalsReviewer': 'user', 'developerInstructions': instruction}
+                if self.model:params['model']=self.model
                 if self.thread_id:
                     params['threadId'] = self.thread_id
                     result = self.rpc('thread/resume', params)
                 else:
                     result = self.rpc('thread/start', params)
                 self.thread_id = result['thread']['id']
+                reported_model=result.get('model') or result['thread'].get('model')
+                if self.model and reported_model not in (None,self.model):
+                    raise RuntimeError('模型与指定测试模型不一致，停止测试。')
                 self.initialized=True
                 self.emit('thread', self.thread_id)
             else:
                 # Discard notifications left over from the already completed turn.
                 while not self.messages.empty():self.messages.get_nowait()
-            result = self.rpc('turn/start', {'threadId': self.thread_id,
+            turn_params={'threadId': self.thread_id,
                 'input': [{'type': 'text', 'text': prompt}], 'cwd': self.cwd,
                 'approvalPolicy': 'on-request', 'approvalsReviewer': 'user',
                 'summary':'concise',
-                'sandboxPolicy': {'type':'readOnly'} if self.mode=='chat' else {'type': 'workspaceWrite', 'writableRoots': [self.cwd], 'networkAccess': False}})
+                'sandboxPolicy': {'type':'readOnly'} if self.mode=='chat' else {'type': 'workspaceWrite', 'writableRoots': [self.cwd], 'networkAccess': False}}
+            if self.model:turn_params['model']=self.model
+            if self.effort:turn_params['effort']=self.effort
+            result = self.rpc('turn/start',turn_params)
             self.turn_id = result.get('turn', {}).get('id') or self.turn_id
             while self.finished_turn is None:
                 self.event(self.next(time.monotonic() + 900))
@@ -264,13 +282,8 @@ class CodexSession:
         process = self.process
         if not process:
             return
-        if process.poll() is None:
-            process.terminate()
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+        from linux_runtime import stop_child
+        stop_child(process)
         process.stdin.close()
         process.stdout.close()
         self.process=None;self.initialized=False;self.messages=queue.Queue()

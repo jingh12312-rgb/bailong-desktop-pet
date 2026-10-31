@@ -129,11 +129,12 @@ class TaskWorker(QThread):
     failed = Signal(str, bool)
     request = Signal(str, object)
 
-    def __init__(self, cwd, thread_id, prompt, parent=None, mode='work', session=None):
+    def __init__(self, cwd, thread_id, prompt, parent=None, mode='work', session=None, model=None, effort=None):
         super().__init__(parent)
         self.cancel = threading.Event();self.responses=queue.Queue()
         self.cwd, self.thread_id, self.prompt = cwd, thread_id, prompt
         self.mode=mode;self.session=session
+        self.model=model;self.effort=effort
 
     def ask(self, method, params):
         self.request.emit(method, params)
@@ -143,7 +144,7 @@ class TaskWorker(QThread):
         raise TaskCancelled('主人，我先停下来啦。')
 
     def run(self):
-        session=self.session or CodexSession(self.cwd,self.thread_id,self.cancel,self.event.emit,self.ask,mode=self.mode)
+        session=self.session or CodexSession(self.cwd,self.thread_id,self.cancel,self.event.emit,self.ask,mode=self.mode,model=self.model,effort=self.effort)
         self.session=session
         session.cancel=self.cancel;session.emit=self.event.emit;session.ask=self.ask
         try:self.ready.emit(session.run(self.prompt))
@@ -152,9 +153,10 @@ class TaskWorker(QThread):
 
 
 class ChatController(QObject):
-    def __init__(self, pet, directory=None):
+    def __init__(self, pet, directory=None, model=None, effort=None, mode='work'):
         super().__init__(pet)
         self.pet=pet;self.store=HistoryStore(directory)
+        self.model=model;self.effort=effort;self.mode=mode
         self.composer=Composer();self.window=ChatWindow()
         self.active=None;self.running_chat=None;self.running_turn=None;self.worker=None
         self.approval_dialog=None;self.enabled=False;self.closing=False
@@ -250,9 +252,9 @@ class ChatController(QObject):
             self.pet.say('主人，我收到啦！这就认真帮你处理。',4000)
             self.pet.bubble.is_task_bubble=True
         previous=getattr(self.worker,'session',None) if self.worker else None
-        mode='work'
+        mode=self.mode
         if previous and (previous.thread_id!=self.active.get('threadId') or previous.mode!=mode):previous.close();previous=None
-        self.worker=TaskWorker(self.active['cwd'],self.active.get('threadId'),prompt,self,mode=mode,session=previous)
+        self.worker=TaskWorker(self.active['cwd'],self.active.get('threadId'),prompt,self,mode=mode,session=previous,model=self.model,effort=self.effort)
         self.worker.event.connect(self.receive);self.worker.ready.connect(self.completed);self.worker.failed.connect(self.failed)
         self.worker.request.connect(self.request);self.worker.start()
 
