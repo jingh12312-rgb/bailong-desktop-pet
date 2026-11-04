@@ -5,10 +5,16 @@ from platform_support import resource_root
 
 def ffmpeg_path():
     root=resource_root()
-    for candidate in (root/'tools/ffmpeg.exe',root/'tools/ffmpeg',root/'work/video-deps/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe'):
-        if candidate.is_file():return str(candidate)
+    candidates=(root/'tools/ffmpeg',) if sys.platform=='darwin' else (root/'tools/ffmpeg.exe',root/'tools/ffmpeg',root/'work/video-deps/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe')
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate,os.X_OK):return str(candidate)
     found=shutil.which('ffmpeg')
     if found:return found
+    if not getattr(sys,'frozen',False):
+        try:
+            import imageio_ffmpeg
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError:pass
     raise RuntimeError('缺少透明动画播放器，请重新完整解压桌宠安装包。')
 
 def rgba_frames(path,size):

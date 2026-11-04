@@ -30,6 +30,7 @@ class Composer(QWidget):
 
     def __init__(self):
         super().__init__(None, FLAGS)
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setWindowTitle('白龙娘 · 对话模式')
         self.setStyleSheet(STYLE)
         self.setFixedSize(280, 152)

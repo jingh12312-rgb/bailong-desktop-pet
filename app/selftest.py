@@ -3,6 +3,7 @@ import os,json,time,traceback
 from pathlib import Path
 
 def run(root):
+    root.mkdir(parents=True,exist_ok=True)
     os.environ['QT_QPA_PLATFORM']='offscreen'
     report={'passed':False,'checks':[],'frozen':False}
     try:
@@ -42,7 +43,8 @@ def run(root):
             frames=pet.load(item);assert abs(len(frames)-round(item['durationMs']*item.get('fps',30 if item.get('number')=='03' and item.get('movementAngleRange') else 24)/1000))<=1
             assert frames[0].width()==pet.frame_size
         assert len(pet.variants)==15 and len(items)==24+len(pet.manifest.get('additionalIdleAnimations',[]))+len(pet.movement_slots);report['checks'].append(f'{len(items)}段动画可解码，含移动差分')
-        assert (root/'app/sounds/click.wav').is_file()
+        from platform_support import resource_root
+        assert (resource_root()/'app/sounds/click.wav').is_file()
         assert next(v for v in pet.variants if v['id']=='14') in items
         for item in items:
             assert 'renderScale' in item and 'renderOffset' in item
