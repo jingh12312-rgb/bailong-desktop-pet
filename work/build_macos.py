@@ -1,23 +1,91 @@
+"""Build a self-contained macOS app on the current Mac architecture."""
 from pathlib import Path
-import sys,subprocess,shutil,json
-root=Path(__file__).resolve().parents[1]
-if sys.platform!='darwin':raise SystemExit('必须在Mac上运行；本脚本不生成Windows包。')
-# Install requirements-macos.txt in a clean virtual environment first.
-import PyInstaller.__main__
-PyInstaller.__main__.run(['--noconfirm','--clean','--windowed','--name','BailongPet','--osx-bundle-identifier','com.bailongpet.desktop','--distpath',str(root/'dist-macos'),'--workpath',str(root/'.build-macos'),'--specpath',str(root/'.build-macos'),'--hidden-import','autostart','--hidden-import','mac_autostart','--hidden-import','selftest','--hidden-import','AppKit','--hidden-import','Quartz','--hidden-import','PySide6.QtMultimedia',str(root/'app/pet.py')])
-resources=root/'dist-macos/BailongPet.app/Contents/Resources'
-assets=root/'outputs/白龙桌宠素材';dest=resources/'outputs/白龙桌宠素材';dest.mkdir(parents=True,exist_ok=True)
-m=json.loads((assets/'素材清单.json').read_text(encoding='utf-8'))
-items=[m['idle']]+m.get('additionalIdleAnimations',[])+m['variants']+[v for v in m.get('workAnimations',[]) if v]+m.get('movementAnimations',[])+[m[k] for k in ('dragAnimation','landingAnimation','quotaAnimation') if m.get(k)]
-for v in items:
- rel=v.get('playbackFile') or v['file'].replace('.webm','.webp');target=dest/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(assets/rel,target)
- if v.get('returnTransition'):
-  rel=v['returnTransition']['file'];target=dest/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(assets/rel,target)
-for v in items:v.pop('source',None)
-(resources/'app').mkdir(exist_ok=True);shutil.copytree(root/'app/sounds',resources/'app/sounds',dirs_exist_ok=True)
-(dest/'素材清单.json').write_text(json.dumps(m,ensure_ascii=False),encoding='utf-8')
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
 import plistlib
-p=root/'dist-macos/BailongPet.app/Contents/Info.plist';data=plistlib.loads(p.read_bytes());data['LSUIElement']=True;p.write_bytes(plistlib.dumps(data))
-# Re-sign after resources/plist changes. Ad-hoc signing is for local testing only.
-subprocess.run(['codesign','--force','--deep','--sign','-',str(root/'dist-macos/BailongPet.app')],check=True)
-print('生成了本机构架的未公证测试.app。公开发布前必须进行Mac实机验收、正式签名和公证。')
+
+if sys.platform != 'darwin':
+    raise SystemExit('Build this application on macOS.')
+
+import imageio_ffmpeg
+import PyInstaller.__main__
+from PIL import Image
+
+root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root / 'app'))
+from video_frames import rgba_frames
+
+assets = root / 'outputs/白龙桌宠素材'
+manifest = json.loads((assets / '素材清单.json').read_text(encoding='utf-8'))
+ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe())
+decoders = subprocess.check_output([str(ffmpeg), '-hide_banner', '-decoders'], text=True)
+if 'libvpx-vp9' not in decoders:
+    raise SystemExit('FFmpeg must include the libvpx-vp9 alpha decoder.')
+
+build = root / '.build-macos'
+build.mkdir(exist_ok=True)
+staged_assets = build / 'assets'
+if staged_assets.exists():
+    shutil.rmtree(staged_assets)
+staged_assets.mkdir()
+items = ([manifest['idle']] + manifest.get('additionalIdleAnimations', [])
+         + manifest['variants'] + [v for v in manifest.get('workAnimations', []) if v]
+         + manifest.get('movementAnimations', [])
+         + [manifest[k] for k in ('dragAnimation', 'landingAnimation', 'quotaAnimation')
+            if manifest.get(k)])
+for item in items:
+    files = [item.get('playbackFile') or item['file'].replace('.webm', '.webp')]
+    if item.get('returnTransition'):
+        files.append(item['returnTransition']['file'])
+    for relative in files:
+        target = staged_assets / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(assets / relative, target)
+    item.pop('source', None)
+(staged_assets / '素材清单.json').write_text(
+    json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+idle = manifest['idle']
+frames = rgba_frames(assets / (idle.get('playbackFile') or idle['file']), 512)
+try:
+    icon = Image.frombytes('RGBA', (512, 512), next(frames))
+finally:
+    frames.close()
+icon_path = build / 'BailongPet.icns'
+icon.save(icon_path)
+
+# A stable name lets the runtime locate its bundled decoder without PATH.
+tools = build / 'tools'
+tools.mkdir(exist_ok=True)
+decoder = tools / 'ffmpeg'
+shutil.copy2(ffmpeg, decoder)
+decoder.chmod(0o755)
+destination = Path(os.environ.get('BAILONG_DIST_DIR', str(root / 'dist-macos')))
+PyInstaller.__main__.run([
+    '--noconfirm', '--clean', '--windowed', '--name', 'BailongPet',
+    '--osx-bundle-identifier', 'com.bailongpet.desktop',
+    '--target-architecture', platform.machine(), '--icon', str(icon_path),
+    '--distpath', str(destination), '--workpath', str(build / 'work'),
+    '--specpath', str(build), '--log-level', 'WARN',
+    '--exclude-module', 'imageio_ffmpeg',
+    '--hidden-import', 'autostart', '--hidden-import', 'mac_autostart',
+    '--hidden-import', 'selftest', '--hidden-import', 'AppKit',
+    '--hidden-import', 'Quartz', '--hidden-import', 'PySide6.QtMultimedia',
+    '--add-binary', f'{decoder}:tools',
+    '--add-data', f'{staged_assets}:outputs/白龙桌宠素材',
+    '--add-data', f'{root / "app/sounds"}:app/sounds',
+    str(root / 'app/pet.py'),
+])
+
+bundle = destination / 'BailongPet.app'
+plist = bundle / 'Contents/Info.plist'
+info = plistlib.loads(plist.read_bytes())
+info.update(LSUIElement=True, CFBundleDisplayName='白龙桌宠',
+            CFBundleShortVersionString='0.5.1', CFBundleVersion='0.5.1.1')
+plist.write_bytes(plistlib.dumps(info))
+subprocess.run(['codesign', '--force', '--deep', '--sign', '-', str(bundle)], check=True)
+subprocess.run(['codesign', '--verify', '--deep', '--strict', str(bundle)], check=True)
+print(f'Built local {platform.machine()} app: {bundle}')

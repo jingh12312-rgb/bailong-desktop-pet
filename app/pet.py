@@ -37,6 +37,7 @@ class Bubble(QWidget):
     dismiss_requested=Signal()
     def __init__(self):
         super().__init__(None, FLAGS)
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.scale_percent=100;self.base_width=256;self.is_task_bubble=False;self.is_size_preview=False
@@ -128,6 +129,7 @@ class Bubble(QWidget):
 class Pet(QWidget):
     def __init__(self):
         super().__init__(None,FLAGS)
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setWindowTitle('白龙桌宠');self.setFixedSize(256,256)
@@ -915,7 +917,7 @@ def main():
         return monitor()
     if '--self-test' in sys.argv:
         from selftest import run
-        return run(ROOT)
+        return run(STATE_ROOT)
     app=QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     if '--enable-autostart' in sys.argv or '--disable-autostart' in sys.argv:
