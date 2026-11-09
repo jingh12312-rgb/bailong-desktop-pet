@@ -407,6 +407,9 @@ class Pet(QWidget):
         path=self.asset_path(item);key=str(path)
         if key in self.pinned_frames:return self.pinned_frames[key]
         if key in self.cache: self.cache.move_to_end(key);return self.cache[key]
+        # Decode directly at the action's destination size. A common-size
+        # cache followed by a near-identity smooth resize blurs fine lines.
+        frame_size=max(1,round(self.frame_size*item.get('renderScale',1.0)))
         frames=[]
         packed=ROOT/'app/cache'/f'{item["id"]}-hq.rgba.gz';metadata=packed.with_suffix('.json')
         if packed.is_file() and metadata.is_file():
@@ -416,21 +419,21 @@ class Pet(QWidget):
                 if len(raw)==meta['frames']*stride:
                     for offset in range(0,len(raw),stride):
                         pixmap=QPixmap.fromImage(QImage(raw[offset:offset+stride],512,512,2048,QImage.Format.Format_RGBA8888).copy())
-                        frames.append(pixmap.scaled(self.frame_size,self.frame_size,Qt.AspectRatioMode.IgnoreAspectRatio,Qt.TransformationMode.SmoothTransformation) if self.frame_size!=512 else pixmap)
+                        frames.append(pixmap.scaled(frame_size,frame_size,Qt.AspectRatioMode.IgnoreAspectRatio,Qt.TransformationMode.SmoothTransformation) if frame_size!=512 else pixmap)
         if frames:
             self.cache[key]=frames
             while len(self.cache)>2:self.cache.popitem(last=False)
             return frames
         if path.suffix.lower()=='.webm':
             from video_frames import rgba_frames
-            for raw in rgba_frames(path,self.frame_size):
-                qimage=QImage(raw,self.frame_size,self.frame_size,self.frame_size*4,QImage.Format.Format_RGBA8888).copy()
+            for raw in rgba_frames(path,frame_size):
+                qimage=QImage(raw,frame_size,frame_size,frame_size*4,QImage.Format.Format_RGBA8888).copy()
                 frames.append(QPixmap.fromImage(qimage))
         else:
             with Image.open(path) as source:
                 for i in range(source.n_frames):
-                    source.seek(i);im=source.convert('RGBA').resize((self.frame_size,self.frame_size),Image.Resampling.LANCZOS)
-                    raw=im.tobytes();qimage=QImage(raw,self.frame_size,self.frame_size,self.frame_size*4,QImage.Format.Format_RGBA8888).copy()
+                    source.seek(i);im=source.convert('RGBA').resize((frame_size,frame_size),Image.Resampling.LANCZOS)
+                    raw=im.tobytes();qimage=QImage(raw,frame_size,frame_size,frame_size*4,QImage.Format.Format_RGBA8888).copy()
                     frames.append(QPixmap.fromImage(qimage))
         if not frames: raise RuntimeError('动画没有可播放帧：'+str(path))
         self.cache[key]=frames
@@ -560,6 +563,9 @@ class Pet(QWidget):
         scale=self.current.get('renderScale',1.0);offset=self.current.get('renderOffset',[0,0])
         width,height=canvas.width()*scale,canvas.height()*scale
         target=QRectF(canvas.x()+(canvas.width()-width)/2+canvas.width()*offset[0],canvas.y()+canvas.height()-height+canvas.height()*offset[1],width,height)
+        if not self.dock_edge and not getattr(self,'dock_exit',None):
+            from animation_render import aligned_rect
+            target=aligned_rect(target,painter.device().devicePixelRatioF())
         frame=self.frames[self.index];painter.drawPixmap(target,frame,QRectF(frame.rect()))
         painter.restore()
     def snapshot_frame(self):
