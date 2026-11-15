@@ -24,6 +24,7 @@ class StreamingFrames:
         self.buffer = buffer
         self.key = str(path.resolve())
         self.count = frame_count(path)
+        self.failure = None
         with closing(rgba_frames(path, size)) as frames:
             self.first = pixmap_from_rgba(next(frames), size)
         self.reset()
@@ -38,10 +39,19 @@ class StreamingFrames:
     def activate(self):
         self.reset()
         path, size = self.path, self.size
-        self.buffer.activate(self.key, lambda register: rgba_frames(
-            path, size, on_process=register))
+        factory = (lambda register: iter(())) if self.failure else (
+            lambda register: rgba_frames(path, size, on_process=register))
+        self.buffer.activate(self.key, factory)
+
+    def freeze(self, error):
+        """Retain a safe image and cancel a failed stream without retry loops."""
+        self.failure = str(error)
+        self.reset()
+        self.buffer.activate(self.key, lambda register: iter(()))
 
     def refresh(self, index):
+        if self.failure:
+            return False
         raw = self.buffer.get(self.key, index)
         if index == 0:
             changed = self.last_index != 0

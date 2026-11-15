@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QPainter, QPixmap
 from streaming_frames import StreamingFrames
 from video_frames import frame_count
 
@@ -81,6 +83,34 @@ class StreamingTests(unittest.TestCase):
         with patch.object(self.buffer, 'get', side_effect=RuntimeError('decode failed')):
             with self.assertRaisesRegex(RuntimeError, 'decode failed'):
                 frames.refresh(1)
+
+    def test_product_reports_failure_once_and_keeps_safe_first_frame(self):
+        from pet import Pet
+        frames = self.frames()
+        frames.activate()
+        pet = SimpleNamespace(dock_edge=None, current={'durationMs':10000},
+                              started=time.monotonic()-2.1, mode='idle', frames=frames,
+                              transition=None, index=1, update_frame=Mock(), say=Mock())
+        with patch.object(self.buffer, 'get', side_effect=RuntimeError('decode failed')) as get:
+            Pet.animate(pet)
+            Pet.animate(pet)
+            get.assert_called_once()
+        self.assertEqual(frames.failure, 'decode failed')
+        self.assertIs(frames.last, frames.first)
+        pet.say.assert_called_once()
+
+    def test_paint_uses_gui_pixmap_without_querying_failed_decoder(self):
+        from pet import Pet
+        frames = self.frames()
+        pet = SimpleNamespace(dock_edge=None,movement_mirrored=False,current={},frames=frames,index=1)
+        canvas = QPixmap(2,2)
+        painter = QPainter(canvas)
+        try:
+            with patch.object(self.buffer, 'get', side_effect=RuntimeError('decode failed')) as get:
+                Pet.draw_frame(pet,painter,QRectF(0,0,2,2))
+                get.assert_not_called()
+        finally:
+            painter.end()
 
 
 class MetadataTests(unittest.TestCase):

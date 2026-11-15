@@ -119,7 +119,8 @@ def main():
         pet.show()
         pet.tick.start()
         soak_started = time.monotonic()
-        next_switch = next_sample = soak_started
+        next_switch = soak_started
+        next_sample = soak_started + .5
         action = 0
         while time.monotonic()-soak_started < args.soak_seconds:
             now = time.monotonic()
@@ -139,13 +140,23 @@ def main():
         pet.tick.stop()
         snapshot('soak-end')
         pet.close()
-        result['soakCompleted'] = True
+        result['soakPlaybackCompleted'] = True
         result['soakActualSeconds'] = time.monotonic()-soak_started
         result['soakSwitches'] = action
         result['closedBuffer'] = pet.frame_buffer.snapshot()
-        result['childrenAfterClose'] = [p.pid for p in process.children() if p.is_running()]
+        closing_children = process.children()
+        result['initialChildrenAfterClose'] = []
+        for child in closing_children:
+            try:
+                result['initialChildrenAfterClose'].append({'pid':child.pid,'name':child.name(),'command':child.cmdline()})
+            except psutil.NoSuchProcess:
+                pass
+        _, alive = psutil.wait_procs(closing_children, timeout=3)
+        result['childrenAfterClose'] = [p.pid for p in alive]
+        save()
         assert not result['closedBuffer']['worker_alive']
         assert not result['childrenAfterClose']
+        result['soakCompleted'] = True
         save()
         print('COMPLETE '+str(output), flush=True)
 

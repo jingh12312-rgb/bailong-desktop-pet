@@ -528,7 +528,12 @@ class Pet(QWidget):
             else:self.idle()
             return
         index=min(len(self.frames)-1,int(elapsed/duration*len(self.frames)))
-        ready=isinstance(self.frames,StreamingFrames) and self.frames.refresh(index)
+        try:
+            ready=isinstance(self.frames,StreamingFrames) and self.frames.refresh(index)
+        except RuntimeError as error:
+            self.frames.freeze(error);self.index=0;self.update_frame()
+            self.say('这个动作暂时播放失败，重新启动桌宠后可再试。')
+            return
         if self.transition:self.update()
         if index!=self.index:self.index=index;self.update_frame()
         elif ready:self.update_frame()
@@ -568,7 +573,8 @@ class Pet(QWidget):
         scale=self.current.get('renderScale',1.0);offset=self.current.get('renderOffset',[0,0])
         width,height=canvas.width()*scale,canvas.height()*scale
         target=QRectF(canvas.x()+(canvas.width()-width)/2+canvas.width()*offset[0],canvas.y()+canvas.height()-height+canvas.height()*offset[1],width,height)
-        frame=self.frames[self.index];painter.drawPixmap(target,frame,QRectF(frame.rect()))
+        frame=self.frames.last if isinstance(self.frames,StreamingFrames) else self.frames[self.index]
+        painter.drawPixmap(target,frame,QRectF(frame.rect()))
         painter.restore()
     def snapshot_frame(self):
         pixmap=QPixmap(self.frame_size,self.frame_size);pixmap.fill(Qt.GlobalColor.transparent)
