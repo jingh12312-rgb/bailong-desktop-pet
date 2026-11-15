@@ -1,5 +1,7 @@
 # GPT白龙娘动态桌宠 v0.5.1
 
+> 本分支包含透明 WebM 内存优化源码；实现、实测与复现命令见 [MEMORY_OPTIMIZATION.md](MEMORY_OPTIMIZATION.md)。下方发布页链接仍指向上游原版。
+
 Windows轻量版：自移动、吸边探头、大小调节、Codex公开任务进展提醒，35段透明WebM动画。
 
 普通使用者请到[发布页](https://github.com/jingh12312-rgb/bailong-desktop-pet/releases/tag/v0.5.1)下载 `bailong-desktop-pet-v0.5.1-windows-x64-webm.zip`，全部解压后双击 `BailongPet.exe`。
