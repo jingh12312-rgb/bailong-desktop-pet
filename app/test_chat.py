@@ -81,6 +81,7 @@ class ChatUiTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.pet.frame_buffer.close()
         cls.controller.shutdown();cls.pet.tick.stop();cls.pet.bubble.hide();cls.pet.hide()
         cls.temp.cleanup()
 

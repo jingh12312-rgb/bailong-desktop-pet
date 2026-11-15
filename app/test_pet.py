@@ -12,6 +12,7 @@ app=QApplication.instance() or QApplication([])
 class Tests(unittest.TestCase):
     def setUp(self):self.pet=Pet();self.pet.show()
     def tearDown(self):
+        self.pet.frame_buffer.close()
         self.pet.tick.stop();self.pet.bubble.close();self.pet.hide()
         self.pet.frames=[];self.pet.cache.clear();self.pet.pinned_frames.clear();self.pet.transition=None
         self.pet.deleteLater();app.processEvents()

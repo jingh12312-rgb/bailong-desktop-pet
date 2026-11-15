@@ -1,5 +1,6 @@
 """Decode VP9 alpha explicitly; the default VP9 decoder may discard alpha."""
 import os,subprocess,sys,shutil
+import re
 from pathlib import Path
 from platform_support import resource_root
 
@@ -11,11 +12,23 @@ def ffmpeg_path():
     if found:return found
     raise RuntimeError('缺少透明动画播放器，请重新完整解压桌宠安装包。')
 
-def rgba_frames(path,size):
+def frame_count(path):
+    """Read FFmpeg's stream-copy packet count without decoding pixels."""
+    args=[ffmpeg_path(),'-hide_banner','-loglevel','error','-i',str(path),
+          '-map','0:v:0','-c','copy','-f','null','-progress','pipe:1','-nostats',os.devnull]
+    kwargs={'creationflags':subprocess.CREATE_NO_WINDOW} if sys.platform=='win32' else {}
+    result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,**kwargs)
+    counts=re.findall(rb'^frame=(\d+)\s*$',result.stdout,re.MULTILINE)
+    if result.returncode or not counts or int(counts[-1])<=0:
+        raise RuntimeError('动画帧数读取失败：'+str(path)+' '+result.stderr.decode('utf-8',errors='replace')[-1000:])
+    return int(counts[-1])
+
+def rgba_frames(path,size,*,on_process=None):
     args=[ffmpeg_path(),'-hide_banner','-loglevel','error','-threads','2','-c:v','libvpx-vp9','-i',str(path),'-an','-vf',f'scale={size}:{size}:flags=lanczos','-pix_fmt','rgba','-f','rawvideo','pipe:1']
     kwargs={'creationflags':subprocess.CREATE_NO_WINDOW} if sys.platform=='win32' else {}
     with subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,**kwargs) as proc:
         try:
+            if on_process is not None:on_process(proc)
             stride=size*size*4
             while True:
                 raw=proc.stdout.read(stride)
