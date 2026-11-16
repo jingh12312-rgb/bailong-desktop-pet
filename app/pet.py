@@ -925,6 +925,14 @@ class Pet(QWidget):
         QApplication.quit();event.accept()
 
 def main():
+    from windows_runtime import require_desktop_integrity
+    try:
+        require_desktop_integrity()
+    except (OSError, RuntimeError) as error:
+        # Check before starting either the autostart monitor or desktop services.
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None,str(error),'白龙桌宠启动权限',0x10)
+        return 1
     if '--autostart' in sys.argv:
         from autostart import main as monitor
         return monitor()

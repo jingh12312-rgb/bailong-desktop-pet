@@ -11,3 +11,6 @@ outputs/
 检查报告.json
 检查预览.png
 /memory-results.json
+
+# Local runtime diagnostics
+app/显示诊断.json

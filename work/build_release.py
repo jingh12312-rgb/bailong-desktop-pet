@@ -15,6 +15,7 @@ source.mkdir(parents=True,exist_ok=True);(source/'app').mkdir(exist_ok=True)
 modules=['platform_support.py','mac_autostart.py','test_platform_support.py','test_preferences.py','desktop_task_sync.py','test_desktop_task_sync.py','pet.py','movement.py','test_movement.py','quota.py','autostart.py','prepare_assets.py','test_pet.py','selftest.py','version.py','test_quota.py','chat_backend.py','chat_ui.py','test_chat.py','desktop_visibility.py','test_visibility.py','test_session_reuse.py','test_task_notifications.py']
 modules.append('video_frames.py')
 modules.extend(['frame_buffer.py','streaming_frames.py','test_frame_buffer.py','test_streaming_frames.py'])
+modules.extend(['windows_runtime.py','test_windows_runtime.py'])
 for name in modules:shutil.copy2(ROOT/'app'/name,source/'app'/name)
 shutil.copytree(ROOT/'app/sounds',source/'app/sounds',dirs_exist_ok=True)
 guide=(ROOT/'work/release_readme.txt').read_text(encoding='utf-8')
