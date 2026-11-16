@@ -10,6 +10,8 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from quota import read_quota, quota_windows
 from version import VERSION
 from movement import plan_movement, movement_fraction
+from frame_buffer import FrameBuffer
+from streaming_frames import StreamingFrames
 
 from platform_support import resource_root,state_root,configure_mac_window
 ROOT=resource_root()
@@ -138,6 +140,8 @@ class Pet(QWidget):
         self.next_leisure_group='idle';self.next_leisure_at=time.monotonic()+15.0
         self.cache=OrderedDict();self.pinned_frames={};self.frames=[];self.current=None;self.mode='idle';self.index=0
         self.frame_size=min(512,max(256,round(256*max(s.devicePixelRatio() for s in QApplication.screens()))))
+        self.frame_buffer=FrameBuffer(prefetch=8)
+        self.destroyed.connect(self.frame_buffer.close)
         self.transition=None
         self.bubble=Bubble();self.generation=0;self.worker=None;self.quota_inflight=False;self.dragging=False;self.last_click=None
         self.bubble.dismiss_requested.connect(self.dismiss_bubble)
@@ -171,8 +175,8 @@ class Pet(QWidget):
         QApplication.instance().screenAdded.connect(self.watch_screen)
         QApplication.instance().screenRemoved.connect(lambda screen:QTimer.singleShot(0,self.ensure_on_screen))
         self.idle()
-        # User prefers immediate interaction: decode all actions once at startup
-        # and retain them even while hidden, without running the animation timer.
+        # Keep each action's first frame warm for immediate interaction; the
+        # shared decoder keeps only a bounded window of subsequent RGBA frames.
         items=self.idles+self.extra_idles+self.variants+self.movement_slots+[v for v in self.work_slots if v and self.asset_path(v).is_file()]+[self.manifest[name] for name in ('dragAnimation','landingAnimation','quotaAnimation') if self.manifest.get(name)]
         items += [self.return_transition_item(v) for v in self.variants if v.get('returnTransition')]
         progress=None
@@ -407,6 +411,11 @@ class Pet(QWidget):
         path=self.asset_path(item);key=str(path)
         if key in self.pinned_frames:return self.pinned_frames[key]
         if key in self.cache: self.cache.move_to_end(key);return self.cache[key]
+        if path.suffix.lower()=='.webm':
+            frames=StreamingFrames(path,self.frame_size,self.frame_buffer)
+            self.cache[key]=frames
+            while len(self.cache)>2:self.cache.popitem(last=False)
+            return frames
         frames=[]
         packed=ROOT/'app/cache'/f'{item["id"]}-hq.rgba.gz';metadata=packed.with_suffix('.json')
         if packed.is_file() and metadata.is_file():
@@ -421,17 +430,11 @@ class Pet(QWidget):
             self.cache[key]=frames
             while len(self.cache)>2:self.cache.popitem(last=False)
             return frames
-        if path.suffix.lower()=='.webm':
-            from video_frames import rgba_frames
-            for raw in rgba_frames(path,self.frame_size):
-                qimage=QImage(raw,self.frame_size,self.frame_size,self.frame_size*4,QImage.Format.Format_RGBA8888).copy()
+        with Image.open(path) as source:
+            for i in range(source.n_frames):
+                source.seek(i);im=source.convert('RGBA').resize((self.frame_size,self.frame_size),Image.Resampling.LANCZOS)
+                raw=im.tobytes();qimage=QImage(raw,self.frame_size,self.frame_size,self.frame_size*4,QImage.Format.Format_RGBA8888).copy()
                 frames.append(QPixmap.fromImage(qimage))
-        else:
-            with Image.open(path) as source:
-                for i in range(source.n_frames):
-                    source.seek(i);im=source.convert('RGBA').resize((self.frame_size,self.frame_size),Image.Resampling.LANCZOS)
-                    raw=im.tobytes();qimage=QImage(raw,self.frame_size,self.frame_size,self.frame_size*4,QImage.Format.Format_RGBA8888).copy()
-                    frames.append(QPixmap.fromImage(qimage))
         if not frames: raise RuntimeError('动画没有可播放帧：'+str(path))
         self.cache[key]=frames
         while len(self.cache)>2:self.cache.popitem(last=False)
@@ -439,7 +442,10 @@ class Pet(QWidget):
     def play(self,item,mode):
         if self.dock_edge and mode!='idle':return
         if self.movement_plan is not None:self.finish_movement()
-        self.frames=self.load(item);self.current=item;self.mode=mode;self.index=0;self.started=time.monotonic();self.update_frame()
+        if isinstance(self.frames,StreamingFrames):self.frames.reset()
+        self.frames=self.load(item)
+        if isinstance(self.frames,StreamingFrames):self.frames.activate()
+        self.current=item;self.mode=mode;self.index=0;self.started=time.monotonic();self.update_frame()
         if getattr(self,'hidden_since',None) is not None:self.hidden_since=self.started
         self.transition=None
         self.sync_dialogue_visibility()
@@ -522,8 +528,15 @@ class Pet(QWidget):
             else:self.idle()
             return
         index=min(len(self.frames)-1,int(elapsed/duration*len(self.frames)))
+        try:
+            ready=isinstance(self.frames,StreamingFrames) and self.frames.refresh(index)
+        except RuntimeError as error:
+            self.frames.freeze(error);self.index=0;self.update_frame()
+            self.say('这个动作暂时播放失败，重新启动桌宠后可再试。')
+            return
         if self.transition:self.update()
         if index!=self.index:self.index=index;self.update_frame()
+        elif ready:self.update_frame()
     def paintEvent(self,event):
         if self.frames:
             painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -560,7 +573,8 @@ class Pet(QWidget):
         scale=self.current.get('renderScale',1.0);offset=self.current.get('renderOffset',[0,0])
         width,height=canvas.width()*scale,canvas.height()*scale
         target=QRectF(canvas.x()+(canvas.width()-width)/2+canvas.width()*offset[0],canvas.y()+canvas.height()-height+canvas.height()*offset[1],width,height)
-        frame=self.frames[self.index];painter.drawPixmap(target,frame,QRectF(frame.rect()))
+        frame=self.frames.last if isinstance(self.frames,StreamingFrames) else self.frames[self.index]
+        painter.drawPixmap(target,frame,QRectF(frame.rect()))
         painter.restore()
     def snapshot_frame(self):
         pixmap=QPixmap(self.frame_size,self.frame_size);pixmap.fill(Qt.GlobalColor.transparent)
@@ -905,11 +919,20 @@ class Pet(QWidget):
         if self.chat and not self.chat.shutdown():
             event.ignore();QTimer.singleShot(500,self.close);return
         self.desktop_sync.stop()
+        self.frame_buffer.close()
         self.tick.stop();self.visibility_timer.stop();self.tray.hide();self.bubble.close()
         if self.worker and self.worker.isRunning():self.worker.cancel.set();self.worker.wait(3000)
         QApplication.quit();event.accept()
 
 def main():
+    from windows_runtime import require_desktop_integrity
+    try:
+        require_desktop_integrity()
+    except (OSError, RuntimeError) as error:
+        # Check before starting either the autostart monitor or desktop services.
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None,str(error),'白龙桌宠启动权限',0x10)
+        return 1
     if '--autostart' in sys.argv:
         from autostart import main as monitor
         return monitor()
